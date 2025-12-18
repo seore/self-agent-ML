@@ -31,7 +31,7 @@ class FlappyGameAI:
         self.pipe_gap_y = random.randint(120, HEIGHT - 120)
         self.frame = 0
 
-        self.pipe_passed = False  # ✅ correct flag
+        self.pipe_passed = False  
 
     def play_step(self, action_one_hot):
         self.frame += 1
@@ -52,11 +52,10 @@ class FlappyGameAI:
         # move pipe
         self.pipe_x -= PIPE_SPEED
 
-        # base reward: staying alive
+        # base reward
         reward = 0.1
         done = False
 
-        # ✅ score when bird passes the pipe
         if (not self.pipe_passed) and (self.pipe_x + PIPE_WIDTH < BIRD_X):
             self.pipe_passed = True
             self.score += 1
@@ -68,7 +67,6 @@ class FlappyGameAI:
             self.pipe_gap_y = random.randint(120, HEIGHT - 120)
             self.pipe_passed = False
 
-        # ✅ reward shaping (encourage staying near gap center)
         gap_center = self.pipe_gap_y
         dist = abs(self.bird_y - gap_center)
 

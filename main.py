@@ -109,7 +109,7 @@ def run_train(args, cfg):
 
             if agent.n_games % cfg["training"]["save_every_games"] == 0:
                 agent.save(latest_path)
-                plot(scores, mean_scores, run.plot_path)
+                plot(scores, run.plot_path)
 
 
 def run_play(args, cfg):

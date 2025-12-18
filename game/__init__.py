@@ -1,0 +1,19 @@
+from .snake_game import SnakeGameAI
+from .flappy_game import FlappyGameAI
+
+ENV_SPECS = {
+    "snake": {"cls": SnakeGameAI, "input_size": 11, "output_size": 3, "default_model": "snake_model.pth"},
+    "flappy": {"cls": FlappyGameAI, "input_size": 8, "output_size": 2, "default_model": "flappy_model.pth"},
+}
+
+def make_env(env_name: str):
+    env_name = env_name.lower()
+    if env_name not in ENV_SPECS:
+        raise ValueError(f"Unknown env '{env_name}'. Choose from: {list(ENV_SPECS.keys())}")
+    return ENV_SPECS[env_name]["cls"]()
+
+def get_env_spec(env_name: str):
+    env_name = env_name.lower()
+    if env_name not in ENV_SPECS:
+        raise ValueError(f"Unknown env '{env_name}'. Choose from: {list(ENV_SPECS.keys())}")
+    return ENV_SPECS[env_name]

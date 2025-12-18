@@ -24,6 +24,14 @@ class Linear_QNet(nn.Module):
         file_path = os.path.join(model_folder_path, file_name)
         torch.save(self.state_dict(), file_path)
 
+    def load(self, file_name="model.pth"):
+        model_folder_path = "models"
+        file_path = os.path.join(model_folder_path, file_name)
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"No model file found at {file_path}")
+        self.load_state_dict(torch.load(file_path, map_location=torch.device("cpu")))
+        self.eval()
+
 
 class QTrainer:
     def __init__(self, model, lr, gamma):

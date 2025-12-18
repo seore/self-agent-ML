@@ -4,7 +4,6 @@ import numpy as np
 from enum import Enum
 from dataclasses import dataclass
 
-# Game constants
 BLOCK_SIZE = 20
 SPEED = 100  
 

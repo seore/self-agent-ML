@@ -1,8 +1,8 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import os
 
 
 class Linear_QNet(nn.Module):
@@ -15,56 +15,81 @@ class Linear_QNet(nn.Module):
     def forward(self, x):
         x = F.relu(self.linear1(x))
         x = F.relu(self.linear2(x))
-        x = self.linear3(x)
-        return x
-    
-    def save(self, file_name="model.pth"):
-        model_folder_path = "models"
-        os.makedirs(model_folder_path, exist_ok=True)
-        file_path = os.path.join(model_folder_path, file_name)
+        return self.linear3(x)
+
+    def save(self, file_path: str):
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
         torch.save(self.state_dict(), file_path)
 
-    def load(self, file_name="model.pth"):
-        model_folder_path = "models"
-        file_path = os.path.join(model_folder_path, file_name)
+    def load(self, file_path: str, device: torch.device):
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"No model file found at {file_path}")
-        self.load_state_dict(torch.load(file_path, map_location=torch.device("cpu")))
+            raise FileNotFoundError(file_path)
+        if os.path.getsize(file_path) == 0:
+            raise ValueError(f"Model file is empty/corrupted: {file_path}")
+        self.load_state_dict(torch.load(file_path, map_location=device))
         self.eval()
 
 
-class QTrainer:
-    def __init__(self, model, lr, gamma):
-        self.lr = lr
+class DQNTrainer:
+    """
+    Supports:
+      - Target network
+      - Double DQN option
+    """
+    def __init__(self, online_model, target_model, lr, gamma, device, double_dqn: bool):
+        self.online = online_model
+        self.target = target_model
         self.gamma = gamma
-        self.model = model
-        self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
+        self.device = device
+        self.double_dqn = double_dqn
+
+        self.optimizer = optim.Adam(self.online.parameters(), lr=lr)
         self.criterion = nn.MSELoss()
 
-    def train_step(self, state, action, reward, next_state, done):
-        state = torch.tensor(state, dtype=torch.float)
-        next_state = torch.tensor(next_state, dtype=torch.float)
-        action = torch.tensor(action, dtype=torch.long)
-        reward = torch.tensor(reward, dtype=torch.float)
+    @torch.no_grad()
+    def _compute_targets(self, rewards, dones, next_states):
+        """
+        rewards: (B,)
+        dones: (B,) bool
+        next_states: (B, state_dim)
+        returns target_q: (B,)
+        """
+        if self.double_dqn:
+            # online selects action, target evaluates it
+            next_q_online = self.online(next_states)              # (B, A)
+            next_actions = torch.argmax(next_q_online, dim=1)     # (B,)
+            next_q_target = self.target(next_states)             # (B, A)
+            next_q = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)  # (B,)
+        else:
+            next_q = torch.max(self.target(next_states), dim=1).values  # (B,)
 
-        if len(state.shape) == 1:
-            state = state.unsqueeze(0)
-            next_state = next_state.unsqueeze(0)
-            action = action.unsqueeze(0)
-            reward = reward.unsqueeze(0)
-            done = (done,)
+        target_q = rewards + (~dones) * self.gamma * next_q
+        return target_q
 
-        pred = self.model(state)
-        target = pred.clone()
+    def train_batch(self, states, actions, rewards, next_states, dones):
+        """
+        states: (B, S) float32
+        actions: (B,) int64
+        rewards: (B,) float32
+        next_states: (B, S) float32
+        dones: (B,) bool
+        """
+        states = torch.tensor(states, dtype=torch.float32, device=self.device)
+        next_states = torch.tensor(next_states, dtype=torch.float32, device=self.device)
+        actions = torch.tensor(actions, dtype=torch.int64, device=self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+        dones = torch.tensor(dones, dtype=torch.bool, device=self.device)
 
-        for idx in range(len(done)):
-            Q_new = reward[idx]
-            if not done[idx]:
-                Q_new = reward[idx] + self.gamma * torch.max(self.model(next_state[idx]))
-            
-            target[idx][action[idx].item()] = Q_new
+        pred_q_all = self.online(states)  # (B, A)
+        pred_q = pred_q_all.gather(1, actions.unsqueeze(1)).squeeze(1)  # (B,)
+
+        with torch.no_grad():
+            target_q = self._compute_targets(rewards, dones, next_states)
+
+        loss = self.criterion(pred_q, target_q)
 
         self.optimizer.zero_grad()
-        loss = self.criterion(target, pred)
         loss.backward()
         self.optimizer.step()
+
+        return float(loss.item())

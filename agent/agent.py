@@ -1,65 +1,112 @@
+import os
 import random
 import numpy as np
 import torch
 
+from .model import Linear_QNet, DQNTrainer
 from collections import deque
-from .model import Linear_QNet, QTrainer
-
-MAX_MEMORY = 100_000
-BATCH_SIZE = 1000
-LR = 0.001
 
 
 class Agent:
-    def __init__(self, input_size: int, output_size: int, hidden_size: int = 256):
-        self.n_games = 0
-        self.epsilon = 0
-        self.gamma = 0.9
-        self.memory = deque(maxlen=MAX_MEMORY)
-
+    def __init__(
+        self,
+        *,
+        input_size: int,
+        output_size: int,
+        hidden_size: int,
+        lr: float,
+        gamma: float,
+        max_memory: int,
+        batch_size: int,
+        epsilon_start: float,
+        epsilon_end: float,
+        epsilon_decay_games: int,
+        target_update_steps: int,
+        double_dqn: bool,
+        device: torch.device,
+    ):
         self.input_size = input_size
-        self.hidden_size = hidden_size
         self.output_size = output_size
+        self.batch_size = batch_size
 
-        self.model = Linear_QNet(self.input_size, self.hidden_size, self.output_size)
-        self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma)
+        self.gamma = gamma
+        self.device = device
 
-    def load_trained(self, file_name: str):
-        self.model.load(file_name)
-        # force greedy actions (epsilon=0) by pushing n_games high enough
-        self.n_games = 999999
+        self.epsilon_start = epsilon_start
+        self.epsilon_end = epsilon_end
+        self.epsilon_decay_games = max(1, epsilon_decay_games)
 
-    def get_state(self, game):
-        return game.get_state()
+        self.target_update_steps = target_update_steps
+        self.double_dqn = double_dqn
+
+        self.n_games = 0
+        self.steps = 0
+        self.memory = deque(maxlen=max_memory)
+
+        self.online = Linear_QNet(input_size, hidden_size, output_size).to(self.device)
+        self.target = Linear_QNet(input_size, hidden_size, output_size).to(self.device)
+        self.sync_target(hard=True)
+
+        self.trainer = DQNTrainer(
+            online_model=self.online,
+            target_model=self.target,
+            lr=lr,
+            gamma=gamma,
+            device=self.device,
+            double_dqn=double_dqn,
+        )
+
+    def epsilon(self):
+        # linear decay over games
+        t = min(self.n_games / self.epsilon_decay_games, 1.0)
+        return self.epsilon_start + t * (self.epsilon_end - self.epsilon_start)
+
+    def sync_target(self, hard=False):
+        self.target.load_state_dict(self.online.state_dict())
 
     def remember(self, state, action_one_hot, reward, next_state, done):
         action_idx = int(np.argmax(action_one_hot))
         self.memory.append((state, action_idx, reward, next_state, done))
 
-    def train_long_memory(self):
-        if len(self.memory) > BATCH_SIZE:
-            mini_sample = random.sample(self.memory, BATCH_SIZE)
-        else:
-            mini_sample = self.memory
+    def act(self, state, greedy=False):
+        if (not greedy) and (random.random() < self.epsilon()):
+            a = random.randint(0, self.output_size - 1)
+            one_hot = [0] * self.output_size
+            one_hot[a] = 1
+            return one_hot
 
-        states, actions, rewards, next_states, dones = zip(*mini_sample)
-        self.trainer.train_step(states, actions, rewards, next_states, dones)
+        state_t = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        with torch.no_grad():
+            q = self.online(state_t)[0]
+            a = int(torch.argmax(q).item())
+        one_hot = [0] * self.output_size
+        one_hot[a] = 1
+        return one_hot
 
-    def train_short_memory(self, state, action_one_hot, reward, next_state, done):
-        action_idx = int(np.argmax(action_one_hot))
-        self.trainer.train_step(state, action_idx, reward, next_state, done)
+    def train_step(self):
+        if len(self.memory) < self.batch_size:
+            return None
 
-    def get_action(self, state):
-        self.epsilon = max(0, 80 - self.n_games)
+        batch = random.sample(self.memory, self.batch_size)
+        states, actions, rewards, next_states, dones = zip(*batch)
 
-        final_move = [0] * self.output_size
+        loss = self.trainer.train_batch(
+            np.array(states, dtype=np.float32),
+            np.array(actions, dtype=np.int64),
+            np.array(rewards, dtype=np.float32),
+            np.array(next_states, dtype=np.float32),
+            np.array(dones, dtype=np.bool_),
+        )
 
-        if random.randint(0, 200) < self.epsilon:
-            move = random.randint(0, self.output_size - 1)
-        else:
-            state0 = torch.tensor(state, dtype=torch.float)
-            prediction = self.model(state0)
-            move = int(torch.argmax(prediction).item())
+        self.steps += 1
+        if self.steps % self.target_update_steps == 0:
+            self.sync_target(hard=True)
 
-        final_move[move] = 1
-        return final_move
+        return loss
+
+    def save(self, path: str):
+        self.online.save(path)
+
+    def load(self, path: str):
+        self.online.load(path, self.device)
+        self.sync_target(hard=True)

@@ -1,25 +1,43 @@
-import pygame
 import random
 import numpy as np
 
 WIDTH = 400
 HEIGHT = 600
-PIPE_GAP = 150
-PIPE_SPEED = 3
+PIPE_GAP = 220
+PIPE_SPEED = 2
 PIPE_WIDTH = 60
-GRAVITY = 0.5
-JUMP_VELOCITY = -8
+GRAVITY = 0.35
+JUMP_VELOCITY = -7
 BIRD_X = 80
 BIRD_RADIUS = 15
 
 
 class FlappyGameAI:
-    def __init__(self):
-        pygame.init()
-        self.display = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("Flappy RL")
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("arial", 25)
+    """
+    Actions (one-hot):
+      [1, 0] = no flap
+      [0, 1] = flap
+    """
+
+    def __init__(self, *, render=True, fps=60, shaping=True):
+        self.render = render
+        self.fps = fps
+        self.shaping = shaping
+
+        if self.render:
+            import pygame
+            pygame.init()
+            self.pygame = pygame
+            self.display = pygame.display.set_mode((WIDTH, HEIGHT))
+            pygame.display.set_caption("Flappy RL")
+            self.clock = pygame.time.Clock()
+            self.font = pygame.font.SysFont("arial", 25)
+        else:
+            self.pygame = None
+            self.display = None
+            self.clock = None
+            self.font = None
+
         self.reset()
 
     def reset(self):
@@ -27,19 +45,16 @@ class FlappyGameAI:
         self.bird_vel = 0.0
         self.score = 0
 
-        self.pipe_x = WIDTH
+        self.pipe_x = int(WIDTH * 0.75)
         self.pipe_gap_y = random.randint(120, HEIGHT - 120)
-        self.frame = 0
-
-        self.pipe_passed = False  
+        self.pipe_passed = False
 
     def play_step(self, action_one_hot):
-        self.frame += 1
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
+        if self.render:
+            for event in self.pygame.event.get():
+                if event.type == self.pygame.QUIT:
+                    self.pygame.quit()
+                    quit()
 
         flap = int(np.argmax(action_one_hot)) == 1
 
@@ -56,31 +71,34 @@ class FlappyGameAI:
         reward = 0.1
         done = False
 
+        # score when bird passes the pipe
         if (not self.pipe_passed) and (self.pipe_x + PIPE_WIDTH < BIRD_X):
             self.pipe_passed = True
             self.score += 1
             reward = 5.0
 
-        # reset pipe when it leaves screen
+        # reset pipe when offscreen
         if self.pipe_x < -PIPE_WIDTH:
             self.pipe_x = WIDTH
             self.pipe_gap_y = random.randint(120, HEIGHT - 120)
             self.pipe_passed = False
 
-        gap_center = self.pipe_gap_y
-        dist = abs(self.bird_y - gap_center)
+        # shaping (optional)
+        if self.shaping:
+            gap_center = self.pipe_gap_y
+            dist = abs(self.bird_y - gap_center)
+            if self.pipe_x + PIPE_WIDTH >= BIRD_X:
+                if dist < PIPE_GAP / 2:
+                    reward += 0.5
+                reward -= 0.0003 * dist
 
-        if dist < PIPE_GAP / 2:
-            reward += 0.2
-        reward -= 0.001 * dist
-
-        # collision ends episode
         if self._check_collision():
             reward = -10
             done = True
 
-        self._update_ui()
-        self.clock.tick(60)
+        if self.render:
+            self._update_ui()
+            self.clock.tick(self.fps)
 
         return reward, done, self.score
 
@@ -106,6 +124,7 @@ class FlappyGameAI:
         return hits_top or hits_bottom
 
     def _update_ui(self):
+        pygame = self.pygame
         self.display.fill((0, 0, 0))
 
         gap_top = self.pipe_gap_y - PIPE_GAP // 2
@@ -118,7 +137,6 @@ class FlappyGameAI:
 
         text = self.font.render("Score: " + str(self.score), True, (255, 255, 255))
         self.display.blit(text, [0, 0])
-
         pygame.display.flip()
 
     def get_state(self):
@@ -146,5 +164,5 @@ class FlappyGameAI:
                 bird_below_gap,
                 pipe_ahead,
             ],
-            dtype=float,
+            dtype=np.float32,
         )

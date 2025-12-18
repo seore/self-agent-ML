@@ -5,7 +5,8 @@ from enum import Enum
 from dataclasses import dataclass
 
 BLOCK_SIZE = 20
-SPEED = 100  
+SPEED = 100 
+SPEED_DEFAULT = 120 
 
 
 class Direction(Enum):
@@ -22,15 +23,24 @@ class Point:
 
 
 class SnakeGameAI:
-    def __init__(self, w=640, h=480):
+    def __init__(self, w=640, h=480, *, render=True, fps=SPEED_DEFAULT, shaping=False):
         self.w = w
         self.h = h
+        self.render = render
+        self.fps = fps
 
-        pygame.init()
-        self.display = pygame.display.set_mode((self.w, self.h))
-        pygame.display.set_caption("Snake RL")
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("arial", 25)
+        if self.render:
+            pygame.init()
+            self.pygame = pygame
+            self.display = pygame.display.set_mode((self.w, self.h))
+            pygame.display.set_caption("Snake RL")
+            self.clock = pygame.time.Clock()
+            self.font = pygame.font.SysFont("arial", 25)
+        else:
+            self.pygame = None
+            self.display = None
+            self.clock = None
+            self.font = None
 
         self.reset()
 
@@ -57,17 +67,14 @@ class SnakeGameAI:
             self._place_food()
 
     def play_step(self, action):
-        """
-        action: one-hot [straight, right, left]
-        returns: reward, game_over(bool), score(int)
-        """
-        self.frame_iteration += 1
+        if self.render:
+            for event in self.pygame.event.get():
+                if event.type == self.pygame.QUIT:
+                    self.pygame.quit()
+                    quit()
 
-        # Handle quit event
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
+
+        self.frame_iteration += 1
 
         # Move
         self._move(action)
@@ -92,8 +99,8 @@ class SnakeGameAI:
 
         # Update UI and clock
         self._update_ui()
-        self.clock.tick(SPEED)
-
+        if self.render:
+            self.clock.tick(self.fps)
         return reward, game_over, self.score
 
     def is_collision(self, pt=None):
@@ -111,6 +118,10 @@ class SnakeGameAI:
         return False
 
     def _update_ui(self):
+        if not self.render:
+            return
+        
+        pygame = self.pygame
         self.display.fill((0, 0, 0))
 
         # Draw snake
@@ -124,7 +135,6 @@ class SnakeGameAI:
         # Draw score
         text = self.font.render("Score: " + str(self.score), True, (255, 255, 255))
         self.display.blit(text, [0, 0])
-
         pygame.display.flip()
 
     def _move(self, action):

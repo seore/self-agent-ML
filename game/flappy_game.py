@@ -15,8 +15,9 @@ PIPE_IMG = pygame.image.load(os.path.join(ASSETS, "pipe-green.png"))
 BG_IMG = pygame.image.load(os.path.join(ASSETS, "background-day.png"))
 GROUND_IMG = pygame.image.load(os.path.join(ASSETS, "base.png"))
 
-PIPE_IMG = pygame.transform.scale2x(PIPE_IMG)
-GROUND_IMG = pygame.transform.scale2x(GROUND_IMG)
+PIPE_IMG = pygame.transform.scale2x(pygame.image.load(os.path.join(ASSETS, "pipe-green.png")))
+BG_IMG = pygame.transform.scale2x(pygame.image.load(os.path.join(ASSETS, "background-day.png")))
+GROUND_IMG = pygame.transform.scale2x(pygame.image.load(os.path.join(ASSETS, "base.png")))
 
 
 WIDTH = 400
